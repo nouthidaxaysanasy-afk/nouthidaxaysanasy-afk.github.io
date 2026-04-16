@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Horloges mondiales</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f5f4f0;
+    color: #1a1a1a;
+    min-height: 100vh;
+    padding: 2rem 1.5rem;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 500;
+    margin-bottom: 2rem;
+    color: #1a1a1a;
+  }
+  .timezone-group {
+    margin-bottom: 2rem;
+    background: #fff;
+    border: 0.5px solid rgba(0,0,0,0.12);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+  }
+  .tz-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 1rem;
+  }
+  .tz-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: #555;
+    background: #f1efe8;
+    border: 0.5px solid rgba(0,0,0,0.1);
+    border-radius: 8px;
+    padding: 4px 10px;
+    white-space: nowrap;
+  }
+  .tz-time {
+    font-size: 15px;
+    font-weight: 500;
+    color: #1a1a1a;
+    font-variant-numeric: tabular-nums;
+  }
+  .clocks-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .clock-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+  }
+  .city-name {
+    font-size: 11px;
+    color: #888;
+    text-align: center;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  svg.clock-face { display: block; }
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #fff;
+    border: 0.5px solid rgba(0,0,0,0.12);
+    border-radius: 12px;
+    padding: 0.85rem 1.25rem;
+    margin-bottom: 2rem;
+  }
+  .search-label {
+    font-size: 14px;
+    color: #555;
+    white-space: nowrap;
+  }
+  .search-input {
+    font-family: inherit;
+    font-size: 14px;
+    color: #1a1a1a;
+    border: 0.5px solid rgba(0,0,0,0.18);
+    border-radius: 8px;
+    padding: 5px 10px;
+    width: 180px;
+    outline: none;
+    background: #fafaf8;
+    transition: border-color 0.15s;
+  }
+  .search-input:focus { border-color: #185FA5; }
+  .search-hint {
+    font-size: 12px;
+    color: #aaa;
+  }
+  .clock-card.highlighted .clock-face circle:first-child {
+    stroke: #185FA5;
+    stroke-width: 2.5;
+  }
+  .clock-card.highlighted .city-name {
+    color: #185FA5;
+    font-weight: 500;
+  }
+  .clock-card.highlighted {
+    background: #e6f1fb;
+    border-radius: 10px;
+    padding: 6px;
+  }
+  .timezone-group.has-match {
+    border-color: #185FA5;
+    border-width: 1px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Horloges mondiales</h1>
+
+<div class="search-bar">
+  <span class="search-label">What time is it in:</span>
+  <input class="search-input" id="city-search" type="text" maxlength="20" placeholder="ex: Seoul, Dubai…" autocomplete="off" />
+  <span class="search-hint" id="search-hint"></span>
+</div>
+
+<div id="clocks-root"></div>
+
+<script>
+const TIMEZONES = [
+  { offset: 12, label: "UTC+12 (New Zealand)",                  cities: ["NewPlymouth","Auckland","Christchurch"] },
+  { offset: 10, label: "UTC+10 (Australia)",                    cities: ["Forrestfield","Geebung","Lilydale","Melbourne","Glendenning/Prospect","Thomastown"] },
+  { offset: 9,  label: "UTC+9 (Japan/Korea)",                   cities: ["Chiba","Seoul","Eumseong"] },
+  { offset: 8,  label: "UTC+8 (China)",                         cities: ["Shanghai","Yanggu"] },
+
+  { offset: 3,  label: "UTC+3 (Middle East/Turkey)",            cities: ["Beirut","Nahr Ibrahim","Mesaieed","Dubai","Denizli","Istanbul","Tuzla"] },
+  { offset: 2,  label: "UTC+2 (Europe/Afrique du Sud)",         cities: ["Uccle","Buizingen","Charleroi","Dour","Erembodegem","Cheb","Castleford","Edinburgh","Milton Keynes","Autun","Nanterre","Hof","Schiedam","Granollers","Barcelone","Madrid","Seville","Valencia"] },
+  { offset: 1,  label: "UTC+1 (Afrique de l'Ouest/Maroc)",     cities: ["Tema","Abidjan","Casablanca","Marrakech"] },
+  { offset: -3, label: "UTC-3 (Brésil)",                        cities: ["Pavuna","São Paulo"] },
+  { offset: -4, label: "UTC-4 (Chili)",                         cities: ["Santiago"] },
+  { offset: -5, label: "UTC-5 (USA/Canada/Colombie/Pérou)",    cities: ["Montréal","Lima"] },
+];
+
+const SIZE = 72;
+const CX = SIZE / 2, CY = SIZE / 2, R = SIZE / 2 - 3;
+
+const C = {
+  face: "#ffffff",
+  ring: "rgba(0,0,0,0.2)",
+  tick: "rgba(0,0,0,0.25)",
+  hour: "#1a1a1a",
+  min:  "#185FA5",
+  sec:  "#D85A30",
+};
+
+function makeClock() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", SIZE);
+  svg.setAttribute("height", SIZE);
+  svg.setAttribute("viewBox", `0 0 ${SIZE} ${SIZE}`);
+  svg.classList.add("clock-face");
+
+  const bg = document.createElementNS(ns, "circle");
+  bg.setAttribute("cx", CX); bg.setAttribute("cy", CY); bg.setAttribute("r", R);
+  bg.setAttribute("fill", C.face);
+  bg.setAttribute("stroke", C.ring);
+  bg.setAttribute("stroke-width", "1");
+  svg.appendChild(bg);
+
+  for (let i = 0; i < 60; i++) {
+    const angle = (i / 60) * 2 * Math.PI - Math.PI / 2;
+    const major = i % 5 === 0;
+    const inner = R - (major ? 8 : 4);
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", CX + inner * Math.cos(angle));
+    line.setAttribute("y1", CY + inner * Math.sin(angle));
+    line.setAttribute("x2", CX + (R - 1) * Math.cos(angle));
+    line.setAttribute("y2", CY + (R - 1) * Math.sin(angle));
+    line.setAttribute("stroke", C.tick);
+    line.setAttribute("stroke-width", major ? "1.5" : "0.5");
+    svg.appendChild(line);
+  }
+
+  function hand(len, w, color, round) {
+    const el = document.createElementNS(ns, "line");
+    el.setAttribute("x1", CX); el.setAttribute("y1", CY);
+    el.setAttribute("x2", CX); el.setAttribute("y2", CY - len);
+    el.setAttribute("stroke", color);
+    el.setAttribute("stroke-width", w);
+    el.setAttribute("stroke-linecap", round ? "round" : "square");
+    el.setAttribute("transform", `rotate(0,${CX},${CY})`);
+    svg.appendChild(el);
+    return el;
+  }
+
+  const hrHand  = hand(R * 0.50, 2.5, C.hour, true);
+  const minHand = hand(R * 0.75, 1.8, C.min,  true);
+  const secHand = hand(R * 0.85, 0.8, C.sec,  false);
+
+  const cap = document.createElementNS(ns, "circle");
+  cap.setAttribute("cx", CX); cap.setAttribute("cy", CY); cap.setAttribute("r", 3);
+  cap.setAttribute("fill", C.hour);
+  svg.appendChild(cap);
+
+  const dot = document.createElementNS(ns, "circle");
+  dot.setAttribute("cx", CX); dot.setAttribute("cy", CY); dot.setAttribute("r", 1.5);
+  dot.setAttribute("fill", C.face);
+  svg.appendChild(dot);
+
+  return { svg, hrHand, minHand, secHand };
+}
+
+const root = document.getElementById("clocks-root");
+const allClocks = [];
+
+TIMEZONES.forEach(tz => {
+  const group = document.createElement("div");
+  group.className = "timezone-group";
+
+  const header = document.createElement("div");
+  header.className = "tz-header";
+
+  const lbl = document.createElement("span");
+  lbl.className = "tz-label";
+  lbl.textContent = tz.label;
+
+  const timeEl = document.createElement("span");
+  timeEl.className = "tz-time";
+
+  header.appendChild(lbl);
+  header.appendChild(timeEl);
+
+  const row = document.createElement("div");
+  row.className = "clocks-row";
+
+  const tzClocks = [];
+  tz.cities.forEach(city => {
+    const card = document.createElement("div");
+    card.className = "clock-card";
+
+    const { svg, hrHand, minHand, secHand } = makeClock();
+    card.appendChild(svg);
+
+    const name = document.createElement("span");
+    name.className = "city-name";
+    name.title = city;
+    name.textContent = city;
+    card.appendChild(name);
+    card.dataset.city = city.toLowerCase();
+
+    row.appendChild(card);
+    tzClocks.push({ hrHand, minHand, secHand });
+  });
+
+  group.appendChild(header);
+  group.appendChild(row);
+  root.appendChild(group);
+  allClocks.push({ offset: tz.offset, hands: tzClocks, timeEl });
+});
+
+function setHand(hand, deg) {
+  hand.setAttribute("transform", `rotate(${deg},${CX},${CY})`);
+}
+
+function tick() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+
+  allClocks.forEach(({ offset, hands, timeEl }) => {
+    const local = new Date(utcMs + offset * 3600000);
+    const h = local.getHours(), m = local.getMinutes(),
+          s = local.getSeconds(), ms = local.getMilliseconds();
+
+    const secDeg = (s + ms / 1000) * 6;
+    const minDeg = (m + s / 60) * 6;
+    const hrDeg  = ((h % 12) + m / 60) * 30;
+
+    hands.forEach(({ hrHand, minHand, secHand }) => {
+      setHand(hrHand,  hrDeg);
+      setHand(minHand, minDeg);
+      setHand(secHand, secDeg);
+    });
+
+    timeEl.textContent =
+      String(h).padStart(2,"0") + ":" +
+      String(m).padStart(2,"0") + ":" +
+      String(s).padStart(2,"0");
+  });
+
+  requestAnimationFrame(tick);
+}
+
+tick();
+
+const searchInput = document.getElementById("city-search");
+const searchHint  = document.getElementById("search-hint");
+
+const allCards = [];
+document.querySelectorAll(".clock-card").forEach(card => {
+  const city = card.querySelector(".city-name").title.toLowerCase();
+  allCards.push({ card, city, group: card.closest(".timezone-group") });
+});
+
+searchInput.addEventListener("input", () => {
+  const q = searchInput.value.trim().toLowerCase();
+  let matches = 0;
+
+  allCards.forEach(({ card, city, group }) => {
+    card.classList.remove("highlighted");
+    group.classList.remove("has-match");
+  });
+
+  if (q.length >= 2) {
+    allCards.forEach(({ card, city, group }) => {
+      if (city.includes(q)) {
+        card.classList.add("highlighted");
+        group.classList.add("has-match");
+        matches++;
+        setTimeout(() => card.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+      }
+    });
+    searchHint.textContent = matches === 0 ? "Aucun résultat" : matches === 1 ? "1 ville trouvée" : `${matches} villes trouvées`;
+  } else {
+    searchHint.textContent = q.length === 1 ? "Saisir au moins 2 caractères" : "";
+  }
+});
+</script>
+</body>
+</html>
